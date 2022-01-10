@@ -1,0 +1,11 @@
+export PLUGIN_LOCAL_HTTPS_NAME=local-https
+
+# export PLUGIN_LOCAL_HTTPS_DATA=$(plugin::get_app_data_path $PLUGIN_LOCAL_HTTPS_NAME)
+# export PLUGIN_LOCAL_HTTPS_LOGS=$(plugin::get_app_logs_path $PLUGIN_LOCAL_HTTPS_NAME)
+# export PLUGIN_LOCAL_HTTPS_CONFIGS=$(plugin::get_app_configs_path $PLUGIN_LOCAL_HTTPS_NAME)
+
+export PLUGIN_LOCAL_HTTPS_CERTS=$PLUGIN_DATA/certs
+
+if [ ! -d $PLUGIN_LOCAL_HTTPS_CERTS ]; then
+  mkdir -p $PLUGIN_LOCAL_HTTPS_CERTS
+fi

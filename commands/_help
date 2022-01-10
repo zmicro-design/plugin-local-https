@@ -1,0 +1,10 @@
+#!/bin/bash
+
+help() {
+  echo "
+Usage:
+  generate [domain]     Generate ssl certificate for domain, default: localhost
+"
+}
+
+help

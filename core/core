@@ -1,0 +1,124 @@
+#!/bin/bash
+
+load inquirer
+
+local_https::command_exists() {
+    type "$1" &> /dev/null ;
+}
+
+local_https::generate() {
+  set -e
+  local domain=$1
+  local config_dir=${PLUGIN_DIR}/config
+  local data_dir=$PLUGIN_LOCAL_HTTPS_CERTS/$domain
+  local data_tmp=$data_dir/tmp
+
+  log::info "generate https(ssl) for domain (${domain}) ..."
+  
+  if [ ! -d $data_tmp ]; then
+    mkdir -p $data_tmp
+  else
+    rm -rf $data_tmp
+    mkdir -p $data_tmp
+  fi
+
+  # @TODO
+  sudo chown -R $USER $data_tmp
+
+  local cao=certificate-authority-options.conf
+  local options_conf=options.conf
+
+  cd $data_dir
+
+  log::info "preparing config ..."
+  # Remove any lines that start with CN
+  sed '/^CN/ d' $config_dir/conf/$cao > $data_dir/$cao
+  # Modify the conf file to set CN = ${name}
+  echo "CN = ${domain}" >> $data_dir/$cao
+  #
+  sed "s/local.dev/"$domain"/" $config_dir/conf/$options_conf > $data_dir/$options_conf
+
+  log::info "tips: use the same pass phrase for the following steps ..."
+
+  log::info "generate ca private key ..."
+  openssl genrsa -des3 -out "$data_tmp/${domain}CA.key" 2048 >> /dev/null 2>&1
+
+  log::info "generate ca certtificate ..."
+  openssl req -x509 \
+    -config $data_dir/$cao \
+    -new -nodes \
+    -key "$data_tmp/${domain}CA.key" \
+    -sha256 \
+    -days 825 \
+    -out "${domain}CA.pem"  >> /dev/null 2>&1
+
+  # MacOS
+  if local_https::command_exists security; then
+    log::info "write self signed ca to system ..."
+
+    # Delete trusted certs by their common name via https://unix.stackexchange.com/a/227014
+    sudo security find-certificate -c "${domain}" -a -Z | sudo awk '/SHA-1/{system("security delete-certificate -Z "$NF)}'
+
+    # Trust the Root Certificate cert
+    sudo security add-trusted-cert \
+      -d \
+      -r trustRoot \
+      -k /Library/Keychains/System.keychain \
+      "$data_dir/${domain}CA.pem"
+  elif local_https::command_exists dpkg-reconfigure; then
+    local YesNo=(Yes No)
+    inquirer::select "Please check `${domain}CA.crt` in next step, are you ready ?" YesNo ok
+    if [ "$ok" != "Yes" ]; then
+      log::error "You have cancel it"
+      exit 1
+    fi
+
+    sudo copy $data_dir/${domain}CA.pem /usr/share/ca-certificates/${domain}CA.crt
+    sudo dpkg-reconfigure ca-certificates
+  fi
+
+  log::info "generate private key for ${domain} ..."
+  # Generate CA-signed Certificate
+  openssl genrsa -out "$data_dir/${domain}.key" 2048 >> /dev/null 2>&1
+
+  openssl req \
+    -new \
+    -config $data_dir/$cao \
+    -key "$data_dir/${domain}.key" \
+    -out "$data_tmp/${domain}.csr" >> /dev/null 2>&1
+
+
+  log::info "generate self signed certificate for ${domain} ..."
+  # Generate SSL Certificate
+  openssl x509 -req \
+    -in "$data_tmp/${domain}.csr" \
+    -CA "$data_dir/${domain}CA.pem" \
+    -CAkey "$data_tmp/${domain}CA.key" \
+    -CAcreateserial \
+    -out "$data_dir/${domain}.crt" \
+    -days 825 \
+    -sha256 \
+    -extfile $data_dir/$options_conf >> /dev/null 2>&1
+
+
+  log::info "clean ..."
+  # Cleanup a stray file
+  rm -rf $data_dir/*.srl
+
+  # The username behind sudo, to give ownership back
+  # local user=$(os::username)
+  # chown -R "$user" .*
+
+  log::success "register local https for $domain done"
+  echo ""
+  log::success "#####################################"
+  log::success "# ssl key: $data_dir/${domain}.key"
+  log::success "# ssl key: $data_dir/${domain}.crt"
+  log::success "#####################################"
+  echo ""
+
+  set +e
+}
+
+export -f local_https::command_exists
+export -f local_https::generate

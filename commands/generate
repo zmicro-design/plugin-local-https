@@ -1,0 +1,28 @@
+#!/bin/bash
+
+help() {
+  echo "Usage:"
+  echo "  zlocal-https generate [domain=localhost]"
+}
+
+core() {
+  if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    help
+    exit 0
+  fi
+
+  local domain=$1
+  if [ -z "$domain" ]; then
+    # log::error "domain is required"
+    # exit 1
+    domain=localhost
+  fi
+
+  local_https::generate $domain
+}
+
+run() {
+  core $@
+}
+
+run $@
