@@ -44,7 +44,8 @@ $ curl https://local.dev
 
 # FAQ
 * Which platform support ?
-  * Now, only `MacOS`
+  * `MacOS`
+  * `Ubuntu`
 
 ## Inspired by
 * [kingkool68/generate-ssl-certs-for-local-development](https://github.com/kingkool68/generate-ssl-certs-for-local-development)
