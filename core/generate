@@ -161,10 +161,11 @@ local_https::generate_domain_certificate() {
   # set +e
 }
 
-local_https::generate_domain_certificate_by_domain_as_ca() {
+local_https::generate_and_sign_domain_certificate_by_self() {
   # set -e
   local domain=$1
   local is_wildcard=$2 # true | false
+  local is_noca=$3     # true | false
 
   local domain_data_dir=$PLUGIN_LOCAL_HTTPS_DOMAIN_DATA_DIR/$domain
   local domain_request_config=$domain_data_dir/domain-request.conf
@@ -210,21 +211,23 @@ local_https::generate_domain_certificate_by_domain_as_ca() {
     rm -rf $domain_as_ca_crt
   fi
 
-  if [ ! -f "$domain_as_ca_crt" ]; then
-    # 注意：证书颁发机构 CA 有效时间不受苹果系统域名 825 天限制，也就是可以是 3650 天（10年），与下文签发具体域名证书对比
-    log::info "generate ca certtificate ..."
-    sudo openssl req -x509 \
-      -config $domain_request_config \
-      -new -nodes \
-      -key "$domain_key" \
-      -sha256 \
-      -days 825 \
-      -out "$domain_as_ca_crt" >>/dev/null
+  if [ "$is_noca" != "true" ]; then
+    if [ ! -f "$domain_as_ca_crt" ]; then
+      # 注意：证书颁发机构 CA 有效时间不受苹果系统域名 825 天限制，也就是可以是 3650 天（10年），与下文签发具体域名证书对比
+      log::info "generate ca certtificate ..."
+      sudo openssl req -x509 \
+        -config $domain_request_config \
+        -new -nodes \
+        -key "$domain_key" \
+        -sha256 \
+        -days 825 \
+        -out "$domain_as_ca_crt" >>/dev/null
 
-    sudo chmod 600 $domain_as_ca_crt
+      sudo chmod 600 $domain_as_ca_crt
+    fi
+
+    local_https::register_ca_certificate_to_system "${domain}" "$domain_as_ca_crt" true
   fi
-
-  local_https::register_ca_certificate_to_system "${domain}" "$domain_as_ca_crt" true
 
   # Generate Server CA Sign Request (服务器证书签名请求)
   log::info "generate domain ca sign request ..."
@@ -241,17 +244,29 @@ local_https::generate_domain_certificate_by_domain_as_ca() {
   # Certificates last for 2 years and 3 months, which is always less than
   # 825 days, the limit that macOS/iOS apply to all certificates,
   # including custom roots. See https://support.apple.com/en-us/HT210176.
-  sudo openssl x509 \
-    -req \
-    -CA "$domain_as_ca_crt" \
-    -CAkey "$domain_key" \
-    -CAcreateserial \
-    -days 825 \
-    -sha256 \
-    -extfile $domain_extfile_config \
-    -in "$domain_csr" \
-    -out "$domain_crt" >>/dev/null 2>&1
-  sudo chown $USER $domain_crt
+  if [ "$is_noca" != "true" ]; then
+    sudo openssl x509 \
+      -req \
+      -CA "$domain_as_ca_crt" \
+      -CAkey "$domain_key" \
+      -CAcreateserial \
+      -days 825 \
+      -sha256 \
+      -extfile $domain_extfile_config \
+      -in "$domain_csr" \
+      -out "$domain_crt" >>/dev/null 2>&1
+    sudo chown $USER $domain_crt
+  else
+    openssl x509 \
+      -req \
+      -days 825 \
+      -sha256 \
+      -extfile $domain_extfile_config \
+      -in "$domain_csr" \
+      -out "$domain_crt" >>/dev/null 2>&1
+
+    local_https::register_ca_certificate_to_system "${domain}" "$domain_crt" true
+  fi
 
   log::info "clean ..."
   # Cleanup a stray file
@@ -278,7 +293,7 @@ local_https::generate() {
   # ca and domain is the same => self sign self
   if [ "$self_as_ca" = "true" ]; then
     log::info "mode: self sign self"
-    local_https::generate_domain_certificate_by_domain_as_ca "$@"
+    local_https::generate_and_sign_domain_certificate_by_self "$@"
     if [ "$?" != "0" ]; then
       log::error "failed to generate domain certificate."
       return 1
@@ -309,6 +324,6 @@ export -f local_https::register_ca_certificate_to_system
 export -f local_https::create_root_ca_and_register_certificate
 export -f local_https::generate_domain_certificate
 
-export -f local_https::generate_domain_certificate_by_domain_as_ca
+export -f local_https::generate_and_sign_domain_certificate_by_self
 
 export -f local_https::generate

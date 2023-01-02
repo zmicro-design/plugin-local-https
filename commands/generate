@@ -7,6 +7,7 @@ help() {
   echo "Options:"
   echo "    --wildcard    Sign wildcard domain certificate"
   echo "    --self-as-ca  Self domain as ca and self signed self"
+  echo "    --no-ca     No generate middle ca certificate, only works when --self-as-ca set"
   echo ""
   echo "Example:"
   echo "    zmicro local-https generate zsxxx.com"
@@ -29,6 +30,7 @@ core() {
 
   local is_wildcard=false
   local self_as_ca=false
+  local is_noca=false
   local domain=""
 
   while [[ $# -gt 0 ]]; do
@@ -40,6 +42,10 @@ core() {
       shift
       ;;
     --self-as-ca)
+      os::set_var self_as_ca true
+      shift
+      ;;
+    --no-ca)
       os::set_var self_as_ca true
       shift
       ;;
@@ -60,7 +66,7 @@ core() {
     exit 1
   fi
 
-  local_https::generate $domain $is_wildcard $self_as_ca
+  local_https::generate $domain $is_wildcard $self_as_ca $is_noca
 }
 
 run() {
