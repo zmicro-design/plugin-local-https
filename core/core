@@ -10,18 +10,18 @@ local_https::generate() {
   set -e
   local domain=$1
   local config_dir=${PLUGIN_DIR}/config
-  local ca_self_domain="local-https.root.ca.com"
+  local ca_self_domain="local-https.zmicro.root_ca.com"
   local ca_data_dir=$PLUGIN_LOCAL_HTTPS_CERTS/ca
   local ca_key=$ca_data_dir/root_ca.key
   local ca_crt=$ca_data_dir/root_ca.crt
   local ca_request_config=$config_dir/conf/ca/certificate-authority-request.conf
 
   local domain_data_dir=$PLUGIN_LOCAL_HTTPS_CERTS/domain/$domain
-  local domain_server_request_config=$domain_data_dir/domain-request.conf
-  local domain_server_extfile_config=$domain_data_dir/domain-extfile.conf
-  local domain_server_key=$domain_data_dir/server.key
-  local domain_server_csr=$domain_data_dir/server.csr
-  local domain_server_crt=$domain_data_dir/server.crt
+  local domain_request_config=$domain_data_dir/domain-request.conf
+  local domain_extfile_config=$domain_data_dir/domain-extfile.conf
+  local domain_key=$domain_data_dir/server.key
+  local domain_csr=$domain_data_dir/server.csr
+  local domain_crt=$domain_data_dir/server.crt
   # local data_tmp=$domain_data_dir/tmp
 
   if [ ! -d "$ca_data_dir" ]; then
@@ -33,9 +33,9 @@ local_https::generate() {
   fi
 
   log::info "generate domain request config ..."
-  sed "s/local.dev/"$domain"/" $config_dir/conf/domain/domain-request.conf >$domain_server_request_config
+  sed "s/local.dev/"$domain"/" $config_dir/conf/domain/domain-request.conf >$domain_request_config
   log::info "generate domain extfile config ..."
-  sed "s/local.dev/"$domain"/" $config_dir/conf/domain/domain-extfile.conf >$domain_server_extfile_config
+  sed "s/local.dev/"$domain"/" $config_dir/conf/domain/domain-extfile.conf >$domain_extfile_config
 
   # if [ ! -d $data_tmp ]; then
   #   mkdir -p $data_tmp
@@ -100,18 +100,18 @@ local_https::generate() {
 
   log::info "generate https(ssl) for domain (${domain}) ..."
 
-  if [ ! -f "$domain_server_key" ]; then
+  if [ ! -f "$domain_key" ]; then
     log::info "generate private key for ${domain} ..."
     # Generate Server Privatekey (服务器私钥)
-    openssl genrsa -out "$domain_server_key" 2048 >>/dev/null 2>&1
+    openssl genrsa -out "$domain_key" 2048 >>/dev/null 2>&1
   fi
 
   # Generate Server CA-signed Request (服务器证书签名请求)
   openssl req \
     -new \
-    -config $domain_server_request_config \
-    -key "$domain_server_key" \
-    -out "$domain_server_csr" >>/dev/null 2>&1
+    -config $domain_request_config \
+    -key "$domain_key" \
+    -out "$domain_csr" >>/dev/null 2>&1
 
   log::info "generate self signed certificate for ${domain} ..."
   # Generate CA-signed SSL Certificate (通过 CSR 向 CA 签发服务端证书)
@@ -127,14 +127,14 @@ local_https::generate() {
     -CAcreateserial \
     -days 825 \
     -sha256 \
-    -extfile $domain_server_extfile_config \
-    -in "$domain_server_csr" \
-    -out "$domain_server_crt" >>/dev/null 2>&1
+    -extfile $domain_extfile_config \
+    -in "$domain_csr" \
+    -out "$domain_crt" >>/dev/null 2>&1
 
   log::info "clean ..."
   # Cleanup a stray file
   rm -rf $domain_data_dir/*.srl
-  rm -rf $domain_server_csr
+  rm -rf $domain_csr
 
   # The username behind sudo, to give ownership back
   # local user=$(os::username)
@@ -143,8 +143,8 @@ local_https::generate() {
   log::success "register local https for $domain done"
   echo ""
   log::success "#####################################"
-  log::success "# ssl key: $domain_server_key"
-  log::success "# ssl key: $domain_server_crt"
+  log::success "# ssl key: $domain_key"
+  log::success "# ssl key: $domain_crt"
   log::success "#####################################"
   echo ""
 
