@@ -262,6 +262,7 @@ local_https::generate_and_sign_domain_certificate_by_self() {
       -days 825 \
       -sha256 \
       -extfile $domain_extfile_config \
+      -signkey $domain_key \
       -in "$domain_csr" \
       -out "$domain_crt" >>/dev/null 2>&1
 
