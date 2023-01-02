@@ -6,11 +6,44 @@ local_https::command_exists() {
   type "$1" &>/dev/null
 }
 
-local_https::create_ca_and_register_certificate() {
+local_https::register_ca_certificate_to_system() {
+  local name=$1
+  local certificate_path=$2
+  local force_write=$3
+
+  log::info "write self signed ca to system ..."
+
+  # MacOS
+  if local_https::command_exists security; then
+    if [ "$(sudo security find-certificate -c "${name}" -a -Z)" = "" ] || [ "$force_write" = "true" ]; then
+      # Delete trusted certs by their common name via https://unix.stackexchange.com/a/227014
+      sudo security find-certificate -c "${name}" -a -Z | sudo awk '/SHA-1/{system("security delete-certificate -Z "$NF)}'
+
+      # Trust the Root Certificate cert
+      sudo security add-trusted-cert \
+        -d \
+        -r trustRoot \
+        -k /Library/Keychains/System.keychain \
+        "$certificate_path"
+    fi
+  elif local_https::command_exists dpkg-reconfigure; then
+    local YesNo=(Yes No)
+    inquirer::select "Please check $($certificate_path) in next step, are you ready ?" YesNo ok
+    if [ "$ok" != "Yes" ]; then
+      log::error "You have cancel it"
+      exit 1
+    fi
+
+    sudo copy $certificate_path /usr/share/ca-certificates/$certificate_path
+    sudo dpkg-reconfigure ca-certificates
+  fi
+}
+
+local_https::create_root_ca_and_register_certificate() {
   if [ ! -f "$PLUGIN_LOCAL_HTTPS_ROOT_CA_PRIVATE_KEY" ]; then
     log::info "generate ca private key ..."
     # need password
-    # openssl genrsa -des3 -out "$PLUGIN_LOCAL_HTTPS_ROOT_CA_PRIVATE_KEY" 2048 >> /dev/null 2>&1
+    # openssl genrsa -des3 -out "$PLUGIN_LOCAL_HTTPS_ROOT_CA_PRIVATE_KEY" 2048 >> /dev/null
     # no password
     sudo openssl genrsa -out "$PLUGIN_LOCAL_HTTPS_ROOT_CA_PRIVATE_KEY" 2048 >>/dev/null 2>&1
     sudo chmod 600 $PLUGIN_LOCAL_HTTPS_ROOT_CA_PRIVATE_KEY
@@ -27,37 +60,12 @@ local_https::create_ca_and_register_certificate() {
       -key "$PLUGIN_LOCAL_HTTPS_ROOT_CA_PRIVATE_KEY" \
       -sha256 \
       -days 3650 \
-      -out "$PLUGIN_LOCAL_HTTPS_ROOT_CA_SELF_CERTIFICATE" >>/dev/null 2>&1
+      -out "$PLUGIN_LOCAL_HTTPS_ROOT_CA_SELF_CERTIFICATE" >>/dev/null
     # -days 825 \
     sudo chmod 600 $PLUGIN_LOCAL_HTTPS_ROOT_CA_SELF_CERTIFICATE
   fi
 
-  # MacOS
-  if local_https::command_exists security; then
-    log::info "write self signed ca to system ..."
-
-    if [ "$(sudo security find-certificate -c "${PLUGIN_LOCAL_HTTPS_ROOT_CA_COMMON_NAME}" -a -Z)" = "" ]; then
-      # Delete trusted certs by their common name via https://unix.stackexchange.com/a/227014
-      sudo security find-certificate -c "${PLUGIN_LOCAL_HTTPS_ROOT_CA_COMMON_NAME}" -a -Z | sudo awk '/SHA-1/{system("security delete-certificate -Z "$NF)}'
-
-      # Trust the Root Certificate cert
-      sudo security add-trusted-cert \
-        -d \
-        -r trustRoot \
-        -k /Library/Keychains/System.keychain \
-        "$PLUGIN_LOCAL_HTTPS_ROOT_CA_SELF_CERTIFICATE"
-    fi
-  elif local_https::command_exists dpkg-reconfigure; then
-    local YesNo=(Yes No)
-    inquirer::select "Please check $($PLUGIN_LOCAL_HTTPS_ROOT_CA_SELF_CERTIFICATE) in next step, are you ready ?" YesNo ok
-    if [ "$ok" != "Yes" ]; then
-      log::error "You have cancel it"
-      exit 1
-    fi
-
-    sudo copy $PLUGIN_LOCAL_HTTPS_ROOT_CA_SELF_CERTIFICATE /usr/share/ca-certificates/$PLUGIN_LOCAL_HTTPS_ROOT_CA_SELF_CERTIFICATE
-    sudo dpkg-reconfigure ca-certificates
-  fi
+  local_https::register_ca_certificate_to_system "${PLUGIN_LOCAL_HTTPS_ROOT_CA_COMMON_NAME}" $PLUGIN_LOCAL_HTTPS_ROOT_CA_SELF_CERTIFICATE
 }
 
 local_https::generate_domain_certificate() {
@@ -106,12 +114,13 @@ local_https::generate_domain_certificate() {
     openssl genrsa -out "$domain_key" 2048 >>/dev/null 2>&1
   fi
 
-  # Generate Server CA-signed Request (服务器证书签名请求)
+  # Generate Server CA Sign Request (服务器证书签名请求)
+  log::info "generate domain ca sign request ..."
   openssl req \
     -new \
     -config $domain_request_config \
     -key "$domain_key" \
-    -out "$domain_csr" >>/dev/null 2>&1
+    -out "$domain_csr" >>/dev/null
 
   log::info "generate self signed certificate for ${domain} ..."
   # Generate CA-signed SSL Certificate (通过 CSR 向 CA 签发服务端证书)
@@ -152,13 +161,140 @@ local_https::generate_domain_certificate() {
   # set +e
 }
 
+local_https::generate_domain_certificate_by_domain_as_ca() {
+  # set -e
+  local domain=$1
+  local is_wildcard=$2 # true | false
+
+  local domain_data_dir=$PLUGIN_LOCAL_HTTPS_DOMAIN_DATA_DIR/$domain
+  local domain_request_config=$domain_data_dir/domain-request.conf
+  local domain_extfile_config=$domain_data_dir/domain-extfile.conf
+  local domain_key=$domain_data_dir/server.key
+  local domain_as_ca_crt=$domain_data_dir/server.ca.crt
+  local domain_csr=$domain_data_dir/server.csr
+  local domain_crt=$domain_data_dir/server.crt
+  # local data_tmp=$domain_data_dir/tmp
+
+  if [ ! -d "$domain_data_dir" ]; then
+    mkdir -p $domain_data_dir
+  fi
+
+  # if [ ! -d $data_tmp ]; then
+  #   mkdir -p $data_tmp
+  # else
+  #   rm -rf $data_tmp
+  #   mkdir -p $data_tmp
+  # fi
+
+  cd $domain_data_dir
+
+  log::info "generate https(ssl) for domain (${domain}) ..."
+
+  if [ "$is_wildcard" = "true" ]; then
+    log::info "generate wildcard domain (*.$domain) request config ..."
+    sed "s/local.dev/*."$domain"/" $PLUGIN_LOCAL_HTTPS_DOMAIN_REQUEST_CONFIG_TEMPLATE >$domain_request_config
+    log::info "generate domain extfile config ..."
+    sed "s/local.dev/"$domain"/" $PLUGIN_LOCAL_HTTPS_DOMAIN_EXTFILE_CONFIG_TEMPLATE >$domain_extfile_config
+  else
+    log::info "generate domain ($domain) request config ..."
+    sed "s/local.dev/"$domain"/" $PLUGIN_LOCAL_HTTPS_DOMAIN_REQUEST_CONFIG_TEMPLATE >$domain_request_config
+    log::info "generate domain extfile config ..."
+    sed "s/local.dev/"$domain"/" $PLUGIN_LOCAL_HTTPS_DOMAIN_EXTFILE_CONFIG_TEMPLATE >$domain_extfile_config
+  fi
+
+  if [ ! -f "$domain_key" ]; then
+    log::info "generate private key for ${domain} ..."
+    # Generate Server Privatekey (服务器私钥)
+    openssl genrsa -out "$domain_key" 2048 >>/dev/null 2>&1
+
+    rm -rf $domain_as_ca_crt
+  fi
+
+  if [ ! -f "$domain_as_ca_crt" ]; then
+    # 注意：证书颁发机构 CA 有效时间不受苹果系统域名 825 天限制，也就是可以是 3650 天（10年），与下文签发具体域名证书对比
+    log::info "generate ca certtificate ..."
+    sudo openssl req -x509 \
+      -config $domain_request_config \
+      -new -nodes \
+      -key "$domain_key" \
+      -sha256 \
+      -days 825 \
+      -out "$domain_as_ca_crt" >>/dev/null
+
+    sudo chmod 600 $domain_as_ca_crt
+  fi
+
+  local_https::register_ca_certificate_to_system "${domain}" "$domain_as_ca_crt" true
+
+  # Generate Server CA Sign Request (服务器证书签名请求)
+  log::info "generate domain ca sign request ..."
+  openssl req \
+    -new \
+    -config $domain_request_config \
+    -key "$domain_key" \
+    -out "$domain_csr" >>/dev/null
+
+  log::info "generate self signed certificate for ${domain} ..."
+  # Generate CA-signed SSL Certificate (通过 CSR 向 CA 签发服务端证书)
+  #
+  # 注意：苹果系统限制，必须使用 SHA256 且域名证书必须小于 825 天，也就是说不能签发 10 年的域名证书，但不影响上面的 CA
+  # Certificates last for 2 years and 3 months, which is always less than
+  # 825 days, the limit that macOS/iOS apply to all certificates,
+  # including custom roots. See https://support.apple.com/en-us/HT210176.
+  sudo openssl x509 \
+    -req \
+    -CA "$domain_as_ca_crt" \
+    -CAkey "$domain_key" \
+    -CAcreateserial \
+    -days 825 \
+    -sha256 \
+    -extfile $domain_extfile_config \
+    -in "$domain_csr" \
+    -out "$domain_crt" >>/dev/null 2>&1
+  sudo chown $USER $domain_crt
+
+  log::info "clean ..."
+  # Cleanup a stray file
+  rm -f $domain_data_dir/*.srl
+  rm -f $domain_csr
+  sudo rm -f $domain_as_ca_crt
+
+  # The username behind sudo, to give ownership back
+  # local user=$(os::username)
+  # chown -R "$user" .*
+
+  log::success "register local https for $domain done"
+  echo ""
+  log::success "#####################################"
+  log::success "# ssl key: $domain_key"
+  log::success "# ssl key: $domain_crt"
+  log::success "#####################################"
+  echo ""
+}
+
 local_https::generate() {
-  local_https::create_ca_and_register_certificate
+  local self_as_ca="$3" # true | false
+
+  # ca and domain is the same => self sign self
+  if [ "$self_as_ca" = "true" ]; then
+    log::info "mode: self sign self"
+    local_https::generate_domain_certificate_by_domain_as_ca "$@"
+    if [ "$?" != "0" ]; then
+      log::error "failed to generate domain certificate."
+      return 1
+    fi
+
+    return 0
+  fi
+
+  # root ca
+  log::info "mode: root ca sign domain"
+  local_https::create_root_ca_and_register_certificate
   if [ "$?" != "0" ]; then
     log::error "failed to create ca and register certificate ."
     return 1
   fi
-  
+
   local_https::generate_domain_certificate "$@"
   if [ "$?" != "0" ]; then
     log::error "failed to generate domain certificate."
@@ -168,7 +304,11 @@ local_https::generate() {
 
 export -f local_https::command_exists
 
-export -f local_https::create_ca_and_register_certificate
+export -f local_https::register_ca_certificate_to_system
+
+export -f local_https::create_root_ca_and_register_certificate
 export -f local_https::generate_domain_certificate
+
+export -f local_https::generate_domain_certificate_by_domain_as_ca
 
 export -f local_https::generate

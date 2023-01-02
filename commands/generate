@@ -5,7 +5,13 @@ help() {
   echo "  zlocal-https generate [options...] [domain=localhost]"
   echo ""
   echo "Options:"
-  echo "    --wildcard  Sign wildcard domain certificate"
+  echo "    --wildcard    Sign wildcard domain certificate"
+  echo "    --self-as-ca  Self domain as ca and self signed self"
+  echo ""
+  echo "Example:"
+  echo "    zmicro local-https generate zsxxx.com"
+  echo "    zmicro local-https generate --wildcard zsxxx.com"
+  echo "    zmicro local-https generate --wildcard --self-as-ca zsxxx.com"
 }
 
 core() {
@@ -22,6 +28,7 @@ core() {
   # fi
 
   local is_wildcard=false
+  local self_as_ca=false
   local domain=""
 
   while [[ $# -gt 0 ]]; do
@@ -30,6 +37,10 @@ core() {
     case $key in
     --wildcard)
       os::set_var is_wildcard true
+      shift
+      ;;
+    --self-as-ca)
+      os::set_var self_as_ca true
       shift
       ;;
     *)
@@ -44,7 +55,12 @@ core() {
     esac
   done
 
-  local_https::generate $domain $is_wildcard
+  if [ -z "$domain" ]; then
+    log::error "[$(timestamp)] domain is required"
+    exit 1
+  fi
+
+  local_https::generate $domain $is_wildcard $self_as_ca
 }
 
 run() {
