@@ -127,6 +127,7 @@ local_https::generate() {
   log::info "clean ..."
   # Cleanup a stray file
   rm -rf $domain_data_dir/*.srl
+  rm -rf $domain_server_csr
 
   # The username behind sudo, to give ownership back
   # local user=$(os::username)
