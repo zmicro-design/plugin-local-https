@@ -75,7 +75,7 @@ local_https::generate() {
   if local_https::command_exists security; then
     log::info "write self signed ca to system ..."
 
-    if [ "$(sudo security find-certificate -c "${domain}" -a -Z )" = "" ]; then
+    if [ "$(sudo security find-certificate -c "${domain}" -a -Z)" = "" ]; then
       # Delete trusted certs by their common name via https://unix.stackexchange.com/a/227014
       sudo security find-certificate -c "${domain}" -a -Z | sudo awk '/SHA-1/{system("security delete-certificate -Z "$NF)}'
 
@@ -98,9 +98,11 @@ local_https::generate() {
     sudo dpkg-reconfigure ca-certificates
   fi
 
-  log::info "generate private key for ${domain} ..."
-  # Generate Server Privatekey (服务器私钥)
-  openssl genrsa -out "$domain_server_key" 2048 >>/dev/null 2>&1
+  if [ ! -f "$domain_server_key" ]; then
+    log::info "generate private key for ${domain} ..."
+    # Generate Server Privatekey (服务器私钥)
+    openssl genrsa -out "$domain_server_key" 2048 >>/dev/null 2>&1
+  fi
 
   # Generate CA-signed Request (服务器证书签名请求)
   openssl req \
