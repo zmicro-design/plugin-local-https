@@ -14,17 +14,15 @@ local_https::generate() {
   local ca_data_dir=$PLUGIN_LOCAL_HTTPS_CERTS/ca
   local ca_key=$ca_data_dir/root_ca.key
   local ca_crt=$ca_data_dir/root_ca.crt
-  local ca_options=$config_dir/conf/ca/certificate-authority-options.conf
+  local ca_request_config=$config_dir/conf/ca/certificate-authority-request.conf
 
   local domain_data_dir=$PLUGIN_LOCAL_HTTPS_CERTS/domain/$domain
-  local domain_server_ca_options=$domain_data_dir/certificate-authority-options.conf
-  local domain_server_options=$domain_data_dir/options.conf
+  local domain_server_request_config=$domain_data_dir/domain-request.conf
+  local domain_server_extfile_config=$domain_data_dir/domain-extfile.conf
   local domain_server_key=$domain_data_dir/server.key
   local domain_server_csr=$domain_data_dir/server.csr
   local domain_server_crt=$domain_data_dir/server.crt
   # local data_tmp=$domain_data_dir/tmp
-
-  log::info "generate https(ssl) for domain (${domain}) ..."
 
   if [ ! -d "$ca_data_dir" ]; then
     mkdir -p $ca_data_dir
@@ -34,15 +32,17 @@ local_https::generate() {
     mkdir -p $domain_data_dir
   fi
 
+  log::info "generate domain request config ..."
+  sed "s/local.dev/"$domain"/" $config_dir/conf/domain/domain-request.conf >$domain_server_request_config
+  log::info "generate domain extfile config ..."
+  sed "s/local.dev/"$domain"/" $config_dir/conf/domain/domain-extfile.conf >$domain_server_extfile_config
+
   # if [ ! -d $data_tmp ]; then
   #   mkdir -p $data_tmp
   # else
   #   rm -rf $data_tmp
   #   mkdir -p $data_tmp
   # fi
-
-  local cao=certificate-authority-options.conf
-  local options_conf=options.conf
 
   cd $domain_data_dir
 
@@ -54,13 +54,15 @@ local_https::generate() {
     # openssl genrsa -des3 -out "$ca_key" 2048 >> /dev/null 2>&1
     # no password
     openssl genrsa -out "$ca_key" 2048 >>/dev/null 2>&1
+
+    rm -rf $ca_crt
   fi
 
   if [ ! -f "$ca_crt" ]; then
     # 注意：证书颁发机构 CA 有效时间不受苹果系统域名 825 天限制，也就是可以是 3650 天（10年），与下文签发具体域名证书对比
     log::info "generate ca certtificate ..."
     openssl req -x509 \
-      -config $ca_options \
+      -config $ca_request_config \
       -new -nodes \
       -key "$ca_key" \
       -sha256 \
@@ -73,7 +75,7 @@ local_https::generate() {
   if local_https::command_exists security; then
     log::info "write self signed ca to system ..."
 
-    if [ "$(sudo security find-certificate -c "${ca_self_domain}" -a -Z)" = "" ]; then
+    if [ "$(sudo security find-certificate -c "${ca_self_domain}_force_replace" -a -Z)" = "" ]; then
       # Delete trusted certs by their common name via https://unix.stackexchange.com/a/227014
       sudo security find-certificate -c "${ca_self_domain}" -a -Z | sudo awk '/SHA-1/{system("security delete-certificate -Z "$NF)}'
 
@@ -96,24 +98,18 @@ local_https::generate() {
     sudo dpkg-reconfigure ca-certificates
   fi
 
+  log::info "generate https(ssl) for domain (${domain}) ..."
+
   if [ ! -f "$domain_server_key" ]; then
     log::info "generate private key for ${domain} ..."
     # Generate Server Privatekey (服务器私钥)
     openssl genrsa -out "$domain_server_key" 2048 >>/dev/null 2>&1
   fi
 
-  log::info "preparing config ..."
-  # Remove any lines that start with CN
-  sed '/^CN/ d' $config_dir/conf/domain/$cao >$domain_server_ca_options
-  # Modify the conf file to set CN = ${name}
-  echo "CN = ${domain}" >>$domain_server_ca_options
-  #
-  sed "s/local.dev/"$domain"/" $config_dir/conf/domain/$options_conf >$domain_server_options
-
-  # Generate CA-signed Request (服务器证书签名请求)
+  # Generate Server CA-signed Request (服务器证书签名请求)
   openssl req \
     -new \
-    -config $domain_server_ca_options \
+    -config $domain_server_request_config \
     -key "$domain_server_key" \
     -out "$domain_server_csr" >>/dev/null 2>&1
 
@@ -122,8 +118,8 @@ local_https::generate() {
   #
   # 注意：苹果系统限制，必须使用 SHA256 且域名证书必须小于 825 天，也就是说不能签发 10 年的域名证书，但不影响上面的 CA
   # Certificates last for 2 years and 3 months, which is always less than
-	# 825 days, the limit that macOS/iOS apply to all certificates,
-	# including custom roots. See https://support.apple.com/en-us/HT210176.
+  # 825 days, the limit that macOS/iOS apply to all certificates,
+  # including custom roots. See https://support.apple.com/en-us/HT210176.
   openssl x509 \
     -req \
     -CA "$ca_crt" \
@@ -131,7 +127,7 @@ local_https::generate() {
     -CAcreateserial \
     -days 825 \
     -sha256 \
-    -extfile $domain_server_options \
+    -extfile $domain_server_extfile_config \
     -in "$domain_server_csr" \
     -out "$domain_server_crt" >>/dev/null 2>&1
 
