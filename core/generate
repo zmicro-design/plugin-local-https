@@ -257,7 +257,7 @@ local_https::generate_domain_certificate_by_domain_as_ca() {
   # Cleanup a stray file
   rm -f $domain_data_dir/*.srl
   rm -f $domain_csr
-  sudo rm -f $domain_as_ca_crt
+  # sudo rm -f $domain_as_ca_crt
 
   # The username behind sudo, to give ownership back
   # local user=$(os::username)
