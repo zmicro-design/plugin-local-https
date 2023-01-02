@@ -41,7 +41,10 @@ local_https::generate() {
   log::info "tips: use the same pass phrase for the following steps ..."
 
   log::info "generate ca private key ..."
-  openssl genrsa -des3 -out "$data_tmp/${domain}CA.key" 2048 >> /dev/null 2>&1
+  # need password
+  # openssl genrsa -des3 -out "$data_tmp/${domain}CA.key" 2048 >> /dev/null 2>&1
+  # no password
+  openssl genrsa -out "$data_tmp/${domain}CA.key" 2048 >> /dev/null 2>&1
 
   log::info "generate ca certtificate ..."
   openssl req -x509 \
