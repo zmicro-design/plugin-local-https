@@ -2,7 +2,10 @@
 
 help() {
   echo "Usage:"
-  echo "  zlocal-https generate [domain=localhost]"
+  echo "  zlocal-https generate [options...] [domain=localhost]"
+  echo ""
+  echo "Options:"
+  echo "    --wildcard  Sign wildcard domain certificate"
 }
 
 core() {
@@ -11,14 +14,37 @@ core() {
     exit 0
   fi
 
-  local domain=$1
-  if [ -z "$domain" ]; then
-    # log::error "domain is required"
-    # exit 1
-    domain=localhost
-  fi
+  # local domain=$1
+  # if [ -z "$domain" ]; then
+  #   # log::error "domain is required"
+  #   # exit 1
+  #   domain=localhost
+  # fi
 
-  local_https::generate $domain
+  local is_wildcard=false
+  local domain=""
+
+  while [[ $# -gt 0 ]]; do
+    local key=$1
+    local value=$2
+    case $key in
+    --wildcard)
+      os::set_var is_wildcard true
+      shift
+      ;;
+    *)
+      if [ -n "$domain" ]; then
+        log::error "ERROR: unknown parameter \"$key\""
+        exit 1
+      fi
+
+      domain=$key
+      shift
+      ;;
+    esac
+  done
+
+  local_https::generate $domain $is_wildcard
 }
 
 run() {
