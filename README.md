@@ -7,13 +7,13 @@
 $ zmicro local-https generate
 
 # 2. use ssl private key and certificate
-# ssl key:          /opt/data/plugins/local-https/certs/localhost/localhost.key
-# ssl certificate:  /opt/data/plugins/local-https/certs/localhost/localhost.crt
+# ssl key:          /opt/data/plugins/local-https/certs/localhost/server.key
+# ssl certificate:  /opt/data/plugins/local-https/certs/localhost/server.crt
 
 # 3. start server (using node.js serve => npm i -g serve)
 $ serve -l 443 \
-  --ssl-key /opt/data/plugins/local-https/certs/localhost/localhost.key \
-  --ssl-cert /opt/data/plugins/local-https/certs/localhost/localhost.crt
+  --ssl-key /opt/data/plugins/local-https/certs/localhost/server.key \
+  --ssl-cert /opt/data/plugins/local-https/certs/localhost/server.crt
 
 # 4. visit browser => https://localhost
 $ curl https://localhost
@@ -27,16 +27,16 @@ $ curl https://localhost
 $ zmicro local-https generate local.dev
 
 # 2. use ssl private key and certificate
-# ssl key:          /opt/data/plugins/local-https/certs/local.dev/local.dev.key
-# ssl certificate:  /opt/data/plugins/local-https/certs/local.dev/local.dev.crt
+# ssl key:          /opt/data/plugins/local-https/certs/local.dev/server.key
+# ssl certificate:  /opt/data/plugins/local-https/certs/local.dev/server.crt
 
 # 3. /etc/hosts add follow
 127.0.0.1 local.dev
 
 # 3. start server (using node.js serve => npm i -g serve)
 $ serve -l 443 \
-  --ssl-key /opt/data/plugins/local-https/certs/local.dev/local.dev.key \
-  --ssl-cert /opt/data/plugins/local-https/certs/local.dev/local.dev.crt
+  --ssl-key /opt/data/plugins/local-https/certs/local.dev/server.key \
+  --ssl-cert /opt/data/plugins/local-https/certs/local.dev/server.crt
 
 # 4. visit browser => https://local.dev
 $ curl https://local.dev
